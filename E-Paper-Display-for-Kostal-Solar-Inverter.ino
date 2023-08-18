@@ -22,37 +22,60 @@ uint16_t hostPort = yy;
 uint32_t altzeit;
 uint8_t bufferRead[50];
 WiFiClient client;
+bool tcpConnectionErrorFlag = false;
+bool wifiConnectionErrorFlag = false;
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi..");
-  }
-  Serial.println("Wifi connected");
+
   Serial.println("Display setup");
   display.init(115200);
   display.setRotation(3);
   display.setTextColor(GxEPD_BLACK);
+  Serial.println("Display setup done");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    if(!wifiConnectionErrorFlag){
+      drawError("Keine Verbindung!");
+      display.update();
+      display.powerDown();
+      wifiConnectionErrorFlag = true;
+    }
+    delay(1000);
+    Serial.println("Connecting to WiFi..");
+  }
+  wifiConnectionErrorFlag = false;
+  Serial.println("Wifi connected");
+  
   drawBackground();
   drawStromerzeugung();
   drawHomeConsumption();
   drawBatterySOC();
   drawMonthlyYieldInEUR();
+  if(tcpConnectionErrorFlag){
+    drawError("TCP Error!");
+  }
   display.update();
   display.powerDown();
-  Serial.println("Display setup done");
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
   if (WiFi.status() != WL_CONNECTED){
+    if(!wifiConnectionErrorFlag){
+      drawError("Keine Verbindung!");
+      display.update();
+      display.powerDown();
+      wifiConnectionErrorFlag = true;
+    }
     delay(1000);
     WiFi.disconnect();
     WiFi.reconnect();
   }
   else{
+    wifiConnectionErrorFlag = false;
     if (millis() - altzeit >= 60000) {
       altzeit=millis();
       drawBackground();
@@ -60,11 +83,28 @@ void loop() {
       drawHomeConsumption();
       drawBatterySOC();
       drawMonthlyYieldInEUR();
+      if(tcpConnectionErrorFlag){
+        drawError("TCP Error!");
+      }
       display.update();
       display.powerDown();
     }
   }
 }
+
+void drawError(char* error){
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setTextColor(GxEPD_BLACK);
+  int16_t tbx, tby; uint16_t tbw, tbh;
+  display.getTextBounds(error, 0, 0, &tbx, &tby, &tbw, &tbh);
+  // center bounding box by transposition of origin:
+  uint16_t x = ((display.width() - tbw) / 2) - tbx;
+  uint16_t y = ((display.height() - tbh) / 2) - tby;
+  drawBackground();
+  display.setCursor(x, y);
+  display.print(error);
+}
+
 void drawStromerzeugung()
 {
   display.fillRect(2, 2, 200, 36, GxEPD_WHITE);
@@ -134,8 +174,10 @@ int TCP_send(uint8_t* message) {
   if (!client.connect(host, hostPort, 1000)) {
     Serial.println("connection failed");
     delay(5000);
+    tcpConnectionErrorFlag = true;
     return -1;
   }
+  tcpConnectionErrorFlag = false;
   Serial.println("sending data to server");
   client.write(message, 12);
   while(!client.available() && client.connected()){
